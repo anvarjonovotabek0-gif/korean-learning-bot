@@ -1,0 +1,805 @@
+__pycache__/
+.venv/
+.env
+*.pyc
+imporaiogram>=3.13,<4.0
+
+import asyncio
+import logging
+import os
+import re
+from pathlib import Path
+
+from aiogram import Bot, Dispatcher, F
+from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.filters import CommandStart
+from aiogram.types import (
+    CallbackQuery,
+    FSInputFile,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
+
+# Hosting'da BOT_TOKEN nomli Environment Variable yarating.
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN environment variable sozlanmagan.")
+
+ADMIN_USERNAME = "Anvarjanov_Otabek"
+CHANNEL_URL = "https://t.me/Otabekanvarovv"
+
+# tests papkasi bot.py bilan bir joyda bo'lishi kerak.
+TESTS_DIR = Path(__file__).resolve().parent / "tests"
+
+TEST_NUMBERS = [35, 36, 37, 41, 47, 48, 52, 60, 64, 74, 78, 83]
+TOPIK1_TESTS = TEST_NUMBERS
+TOPIK2_TESTS = TEST_NUMBERS
+LEVELS = {"1": ("TOPIK I", TOPIK1_TESTS), "2": ("TOPIK II", TOPIK2_TESTS)}
+AUDIO_EXT = {".mp3", ".m4a", ".wav", ".ogg"}
+
+FREE_TIME = []
+
+PAID_COURSE_TEXT = (
+    "💎 <b>Pullik online darslar</b>\n\n"
+    "Koreys tilini noldan o'rgatish guruhi.\n\n"
+    "Jadval, narx va boshlanish sanasi haqida ma'lumot olish uchun "
+    "pastdagi tugma orqali yozing 👇"
+)
+
+logging.basicConfig(level=logging.INFO)
+session = AiohttpSession(timeout=600)
+bot = Bot(
+    BOT_TOKEN,
+    session=session,
+    default=DefaultBotProperties(parse_mode="HTML"),
+)
+dp = Dispatcher()
+
+BACK = [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back")]
+ADMIN_URL = f"https://t.me/{ADMIN_USERNAME}"
+CHANNEL_BTN = [InlineKeyboardButton(text="📺 Kanalga o'tish", url=CHANNEL_URL)]
+
+
+def main_menu():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🆓 Bepul darslar", callback_data="free")],
+            [InlineKeyboardButton(text="📝 Test materiallari", callback_data="tests")],
+            [InlineKeyboardButton(text="💎 Pullik online darslar", callback_data="paid")],
+            [InlineKeyboardButton(text="☕ Bo'sh vaqt bo'limi", callback_data="freetime")],
+            [InlineKeyboardButton(text="📞 Bog'lanish", callback_data="contact")],
+        ]
+    )
+
+
+def links_menu(items):
+    rows = [[InlineKeyboardButton(text=n, url=u)] for n, u in items]
+    rows.append(BACK)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def find_files(folder, num):
+    pdfs, audios = [], []
+    if not folder.exists():
+        return pdfs, audios
+    pattern = re.compile(rf"(?<!\d){num}(?!\d)")
+    for p in sorted(folder.iterdir()):
+        if not p.is_file() or not pattern.search(p.stem):
+            continue
+        ext = p.suffix.lower()
+        if ext == ".pdf":
+            pdfs.append(p)
+        elif ext in AUDIO_EXT:
+            audios.append(p)
+    return pdfs, audios
+
+
+@dp.message(CommandStart())
+async def start(message: Message):
+    name = message.from_user.first_name if message.from_user else "do'stim"
+    await message.answer(
+        f"Assalomu alaykum, {name}! 👋\n\n"
+        "안녕하세요! Koreys tili o'rganish botiga xush kelibsiz.\n"
+        "Kerakli bo'limni tanlang 👇",
+        reply_markup=main_menu(),
+    )
+
+
+@dp.callback_query(F.data == "back")
+async def back(call: CallbackQuery):
+    if call.message:
+        await call.message.edit_text("Kerakli bo'limni tanlang 👇", reply_markup=main_menu())
+    await call.answer()
+
+
+@dp.callback_query(F.data == "free")
+async def free(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[CHANNEL_BTN, BACK])
+    if call.message:
+        await call.message.edit_text(
+            "🆓 <b>Bepul darslar</b>\n\n"
+            "Barcha bepul darslar Telegram kanalimda joylangan. "
+            "Pastdagi tugmani bosib kanalga o'ting 👇",
+            reply_markup=kb,
+        )
+    await call.answer()
+
+
+@dp.callback_query(F.data == "tests")
+async def tests(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📘 TOPIK I", callback_data="tl:1"),
+                InlineKeyboardButton(text="📗 TOPIK II", callback_data="tl:2"),
+            ],
+            BACK,
+        ]
+    )
+    if call.message:
+        await call.message.edit_text(
+            "📝 <b>Test materiallari</b>\n\nDarajani tanlang 👇",
+            reply_markup=kb,
+        )
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("tl:"))
+async def test_list(call: CallbackQuery):
+    level = call.data.split(":")[1]
+    title, numbers = LEVELS[level]
+    rows, row = [], []
+    for n in numbers:
+        row.append(InlineKeyboardButton(text=str(n), callback_data=f"t:{level}:{n}"))
+        if len(row) == 4:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="tests")])
+    if call.message:
+        await call.message.edit_text(
+            f"📝 <b>{title}</b>\n\nTest raqamini tanlang 👇",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("t:"))
+async def send_test(call: CallbackQuery):
+    _, level, num = call.data.split(":")
+    title, _ = LEVELS[level]
+    folder = TESTS_DIR / f"topik{level}"
+    pdfs, audios = find_files(folder, num)
+
+    if not pdfs and not audios:
+        logging.warning("Fayl topilmadi: papka=%s raqam=%s", folder, num)
+        await call.answer("Bu test tez orada joylanadi 🙏", show_alert=True)
+        return
+
+    await call.answer("Yuborilmoqda, biroz kuting...")
+    try:
+        if not call.message:
+            return
+        for pdf in pdfs:
+            await call.message.answer_document(
+                FSInputFile(pdf), caption=f"📝 <b>{title} — {num}-test</b>"
+            )
+        for audio in audios:
+            cap = f"🎧 {title} — {num}-test audiosi"
+            if audio.suffix.lower() in (".mp3", ".m4a"):
+                await call.message.answer_audio(FSInputFile(audio), caption=cap)
+            else:
+                await call.message.answer_document(FSInputFile(audio), caption=cap)
+    except Exception:
+        logging.exception("Yuborishda xato")
+        await call.message.answer(
+            "⚠️ Fayl yuborilmadi. Fayl hajmi va hosting loglarini tekshiring."
+        )
+
+
+@dp.callback_query(F.data == "paid")
+async def paid(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✍️ Yozilish / savol berish", url=ADMIN_URL)],
+            BACK,
+        ]
+    )
+    if call.message:
+        await call.message.edit_text(PAID_COURSE_TEXT, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "freetime")
+async def freetime(call: CallbackQuery):
+    if FREE_TIME:
+        if call.message:
+            await call.message.edit_text(
+                "☕ <b>Bo'sh vaqtingiz bormi? Dam olib o'rganing!</b>",
+                reply_markup=links_menu(FREE_TIME),
+            )
+    else:
+        kb = InlineKeyboardMarkup(inline_keyboard=[CHANNEL_BTN, BACK])
+        if call.message:
+            await call.message.edit_text(
+                "☕ <b>Bo'sh vaqt bo'limi</b>\n\n"
+                "Bu bo'lim tez orada to'ldiriladi. Kuzatib boring 👇",
+                reply_markup=kb,
+            )
+    await call.answer()
+
+
+@dp.callback_query(F.data == "contact")
+async def contact(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Yozish", url=ADMIN_URL)],
+            CHANNEL_BTN,
+            BACK,
+        ]
+    )
+    if call.message:
+        await call.message.edit_text("Savollaringiz bo'lsa yozing 👇", reply_markup=kb)
+    await call.answer()
+
+
+async def main():
+    logging.info("Bot ishga tushmoqda...")
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+KOREYS TILI TELEGRAM BOTI
+
+1) bot.py, requirements.txt va tests/ papkasini bir loyihaga joylang.
+2) Hosting sozlamalarida BOT_TOKEN nomli environment variable yarating.
+3) Value maydoniga BotFather bergan YANGI tokenni kiriting. Uni GitHub yoki chatga yozmang.
+4) Start command: python bot.py
+
+Test fayllari joylashuvi:
+tests/topik1/35.pdf
+tests/topik1/35.mp3
+tests/topik2/35.pdf
+tests/topik2/35.mp3
+
+Eslatma: faqat bot.py va requirements.txt yetarli emas; test materiallari kerak bo'lsa,
+tests papkasini ham hostingga yuklang.
+t asyncioKOREYS TILI TELEGRAM BOTI
+
+1) bot.py, requirements.txt va tests/ papkasini bir loyihaga joylang.
+2) Hosting sozlamalarida BOT_TOKEN nomli environment variable yarating.
+3) Value maydoniga BotFather bergan YANGI tokenni kiriting. Uni GitHub yoki chatga yozmang.
+4) Start command: python bot.py
+
+Test fayllari joylashuvi:
+tests/topik1/35.pdf
+tests/topik1/35.mp3
+tests/topik2/35.pdf
+tests/topik2/35.mp3
+
+Eslatma: faqat bot.py va requirements.txt yetarli emas; test materiallari kerak bo'lsa,
+tests papkasini ham hostingga yuklang.
+
+aiogram>=3.13,<4.0
+
+import asyncio
+import logging
+import os
+import re
+from pathlib import Path
+
+from aiogram import Bot, Dispatcher, F
+from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.filters import CommandStart
+from aiogram.types import (
+    CallbackQuery,
+    FSInputFile,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
+
+# Hosting'da BOT_TOKEN nomli Environment Variable yarating.
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN environment variable sozlanmagan.")
+
+ADMIN_USERNAME = "Anvarjanov_Otabek"
+CHANNEL_URL = "https://t.me/Otabekanvarovv"
+
+# tests papkasi bot.py bilan bir joyda bo'lishi kerak.
+TESTS_DIR = Path(__file__).resolve().parent / "tests"
+
+TEST_NUMBERS = [35, 36, 37, 41, 47, 48, 52, 60, 64, 74, 78, 83]
+TOPIK1_TESTS = TEST_NUMBERS
+TOPIK2_TESTS = TEST_NUMBERS
+LEVELS = {"1": ("TOPIK I", TOPIK1_TESTS), "2": ("TOPIK II", TOPIK2_TESTS)}
+AUDIO_EXT = {".mp3", ".m4a", ".wav", ".ogg"}
+
+FREE_TIME = []
+
+PAID_COURSE_TEXT = (
+    "💎 <b>Pullik online darslar</b>\n\n"
+    "Koreys tilini noldan o'rgatish guruhi.\n\n"
+    "Jadval, narx va boshlanish sanasi haqida ma'lumot olish uchun "
+    "pastdagi tugma orqali yozing 👇"
+)
+
+logging.basicConfig(level=logging.INFO)
+session = AiohttpSession(timeout=600)
+bot = Bot(
+    BOT_TOKEN,
+    session=session,
+    default=DefaultBotProperties(parse_mode="HTML"),
+)
+dp = Dispatcher()
+
+BACK = [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back")]
+ADMIN_URL = f"https://t.me/{ADMIN_USERNAME}"
+CHANNEL_BTN = [InlineKeyboardButton(text="📺 Kanalga o'tish", url=CHANNEL_URL)]
+
+
+def main_menu():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🆓 Bepul darslar", callback_data="free")],
+            [InlineKeyboardButton(text="📝 Test materiallari", callback_data="tests")],
+            [InlineKeyboardButton(text="💎 Pullik online darslar", callback_data="paid")],
+            [InlineKeyboardButton(text="☕ Bo'sh vaqt bo'limi", callback_data="freetime")],
+            [InlineKeyboardButton(text="📞 Bog'lanish", callback_data="contact")],
+        ]
+    )
+
+
+def links_menu(items):
+    rows = [[InlineKeyboardButton(text=n, url=u)] for n, u in items]
+    rows.append(BACK)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def find_files(folder, num):
+    pdfs, audios = [], []
+    if not folder.exists():
+        return pdfs, audios
+    pattern = re.compile(rf"(?<!\d){num}(?!\d)")
+    for p in sorted(folder.iterdir()):
+        if not p.is_file() or not pattern.search(p.stem):
+            continue
+        ext = p.suffix.lower()
+        if ext == ".pdf":
+            pdfs.append(p)
+        elif ext in AUDIO_EXT:
+            audios.append(p)
+    return pdfs, audios
+
+
+@dp.message(CommandStart())
+async def start(message: Message):
+    name = message.from_user.first_name if message.from_user else "do'stim"
+    await message.answer(
+        f"Assalomu alaykum, {name}! 👋\n\n"
+        "안녕하세요! Koreys tili o'rganish botiga xush kelibsiz.\n"
+        "Kerakli bo'limni tanlang 👇",
+        reply_markup=main_menu(),
+    )
+
+
+@dp.callback_query(F.data == "back")
+async def back(call: CallbackQuery):
+    if call.message:
+        await call.message.edit_text("Kerakli bo'limni tanlang 👇", reply_markup=main_menu())
+    await call.answer()
+
+
+@dp.callback_query(F.data == "free")
+async def free(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[CHANNEL_BTN, BACK])
+    if call.message:
+        await call.message.edit_text(
+            "🆓 <b>Bepul darslar</b>\n\n"
+            "Barcha bepul darslar Telegram kanalimda joylangan. "
+            "Pastdagi tugmani bosib kanalga o'ting 👇",
+            reply_markup=kb,
+        )
+    await call.answer()
+
+
+@dp.callback_query(F.data == "tests")
+async def tests(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📘 TOPIK I", callback_data="tl:1"),
+                InlineKeyboardButton(text="📗 TOPIK II", callback_data="tl:2"),
+            ],
+            BACK,
+        ]
+    )
+    if call.message:
+        await call.message.edit_text(
+            "📝 <b>Test materiallari</b>\n\nDarajani tanlang 👇",
+            reply_markup=kb,
+        )
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("tl:"))
+async def test_list(call: CallbackQuery):
+    level = call.data.split(":")[1]
+    title, numbers = LEVELS[level]
+    rows, row = [], []
+    for n in numbers:
+        row.append(InlineKeyboardButton(text=str(n), callback_data=f"t:{level}:{n}"))
+        if len(row) == 4:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="tests")])
+    if call.message:
+        await call.message.edit_text(
+            f"📝 <b>{title}</b>\n\nTest raqamini tanlang 👇",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("t:"))
+async def send_test(call: CallbackQuery):
+    _, level, num = call.data.split(":")
+    title, _ = LEVELS[level]
+    folder = TESTS_DIR / f"topik{level}"
+    pdfs, audios = find_files(folder, num)
+
+    if not pdfs and not audios:
+        logging.warning("Fayl topilmadi: papka=%s raqam=%s", folder, num)
+        await call.answer("Bu test tez orada joylanadi 🙏", show_alert=True)
+        return
+
+    await call.answer("Yuborilmoqda, biroz kuting...")
+    try:
+        if not call.message:
+            return
+        for pdf in pdfs:
+            await call.message.answer_document(
+                FSInputFile(pdf), caption=f"📝 <b>{title} — {num}-test</b>"
+            )
+        for audio in audios:
+            cap = f"🎧 {title} — {num}-test audiosi"
+            if audio.suffix.lower() in (".mp3", ".m4a"):
+                await call.message.answer_audio(FSInputFile(audio), caption=cap)
+            else:
+                await call.message.answer_document(FSInputFile(audio), caption=cap)
+    except Exception:
+        logging.exception("Yuborishda xato")
+        await call.message.answer(
+            "⚠️ Fayl yuborilmadi. Fayl hajmi va hosting loglarini tekshiring."
+        )
+
+
+@dp.callback_query(F.data == "paid")
+async def paid(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✍️ Yozilish / savol berish", url=ADMIN_URL)],
+            BACK,
+        ]
+    )
+    if call.message:
+        await call.message.edit_text(PAID_COURSE_TEXT, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "freetime")
+async def freetime(call: CallbackQuery):
+    if FREE_TIME:
+        if call.message:
+            await call.message.edit_text(
+                "☕ <b>Bo'sh vaqtingiz bormi? Dam olib o'rganing!</b>",
+                reply_markup=links_menu(FREE_TIME),
+            )
+    else:
+        kb = InlineKeyboardMarkup(inline_keyboard=[CHANNEL_BTN, BACK])
+        if call.message:
+            await call.message.edit_text(
+                "☕ <b>Bo'sh vaqt bo'limi</b>\n\n"
+                "Bu bo'lim tez orada to'ldiriladi. Kuzatib boring 👇",
+                reply_markup=kb,
+            )
+    await call.answer()
+
+
+@dp.callback_query(F.data == "contact")
+async def contact(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Yozish", url=ADMIN_URL)],
+            CHANNEL_BTN,
+            BACK,
+        ]
+    )
+    if call.message:
+        await call.message.edit_text("Savollaringiz bo'lsa yozing 👇", reply_markup=kb)
+    await call.answer()
+
+
+async def main():
+    logging.info("Bot ishga tushmoqda...")
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+import logging
+import os
+import re
+from pathlib import Path
+
+from aiogram import Bot, Dispatcher, F
+from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.filters import CommandStart
+from aiogram.types import (
+    CallbackQuery,
+    FSInputFile,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
+
+# Hosting'da BOT_TOKEN nomli Environment Variable yarating.
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN environment variable sozlanmagan.")
+
+ADMIN_USERNAME = "Anvarjanov_Otabek"
+CHANNEL_URL = "https://t.me/Otabekanvarovv"
+
+# tests papkasi bot.py bilan bir joyda bo'lishi kerak.
+TESTS_DIR = Path(__file__).resolve().parent / "tests"
+
+TEST_NUMBERS = [35, 36, 37, 41, 47, 48, 52, 60, 64, 74, 78, 83]
+TOPIK1_TESTS = TEST_NUMBERS
+TOPIK2_TESTS = TEST_NUMBERS
+LEVELS = {"1": ("TOPIK I", TOPIK1_TESTS), "2": ("TOPIK II", TOPIK2_TESTS)}
+AUDIO_EXT = {".mp3", ".m4a", ".wav", ".ogg"}
+
+FREE_TIME = []
+
+PAID_COURSE_TEXT = (
+    "💎 <b>Pullik online darslar</b>\n\n"
+    "Koreys tilini noldan o'rgatish guruhi.\n\n"
+    "Jadval, narx va boshlanish sanasi haqida ma'lumot olish uchun "
+    "pastdagi tugma orqali yozing 👇"
+)
+
+logging.basicConfig(level=logging.INFO)
+session = AiohttpSession(timeout=600)
+bot = Bot(
+    BOT_TOKEN,
+    session=session,
+    default=DefaultBotProperties(parse_mode="HTML"),
+)
+dp = Dispatcher()
+
+BACK = [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back")]
+ADMIN_URL = f"https://t.me/{ADMIN_USERNAME}"
+CHANNEL_BTN = [InlineKeyboardButton(text="📺 Kanalga o'tish", url=CHANNEL_URL)]
+
+
+def main_menu():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🆓 Bepul darslar", callback_data="free")],
+            [InlineKeyboardButton(text="📝 Test materiallari", callback_data="tests")],
+            [InlineKeyboardButton(text="💎 Pullik online darslar", callback_data="paid")],
+            [InlineKeyboardButton(text="☕ Bo'sh vaqt bo'limi", callback_data="freetime")],
+            [InlineKeyboardButton(text="📞 Bog'lanish", callback_data="contact")],
+        ]
+    )
+
+
+def links_menu(items):
+    rows = [[InlineKeyboardButton(text=n, url=u)] for n, u in items]
+    rows.append(BACK)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def find_files(folder, num):
+    pdfs, audios = [], []
+    if not folder.exists():
+        return pdfs, audios
+    pattern = re.compile(rf"(?<!\d){num}(?!\d)")
+    for p in sorted(folder.iterdir()):
+        if not p.is_file() or not pattern.search(p.stem):
+            continue
+        ext = p.suffix.lower()
+        if ext == ".pdf":
+            pdfs.append(p)
+        elif ext in AUDIO_EXT:
+            audios.append(p)
+    return pdfs, audios
+
+
+@dp.message(CommandStart())
+async def start(message: Message):
+    name = message.from_user.first_name if message.from_user else "do'stim"
+    await message.answer(
+        f"Assalomu alaykum, {name}! 👋\n\n"
+        "안녕하세요! Koreys tili o'rganish botiga xush kelibsiz.\n"
+        "Kerakli bo'limni tanlang 👇",
+        reply_markup=main_menu(),
+    )
+
+
+@dp.callback_query(F.data == "back")
+async def back(call: CallbackQuery):
+    if call.message:
+        await call.message.edit_text("Kerakli bo'limni tanlang 👇", reply_markup=main_menu())
+    await call.answer()
+
+
+@dp.callback_query(F.data == "free")
+async def free(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[CHANNEL_BTN, BACK])
+    if call.message:
+        await call.message.edit_text(
+            "🆓 <b>Bepul darslar</b>\n\n"
+            "Barcha bepul darslar Telegram kanalimda joylangan. "
+            "Pastdagi tugmani bosib kanalga o'ting 👇",
+            reply_markup=kb,
+        )
+    await call.answer()
+
+
+@dp.callback_query(F.data == "tests")
+async def tests(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📘 TOPIK I", callback_data="tl:1"),
+                InlineKeyboardButton(text="📗 TOPIK II", callback_data="tl:2"),
+            ],
+            BACK,
+        ]
+    )
+    if call.message:
+        await call.message.edit_text(
+            "📝 <b>Test materiallari</b>\n\nDarajani tanlang 👇",
+            reply_markup=kb,
+        )
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("tl:"))
+async def test_list(call: CallbackQuery):
+    level = call.data.split(":")[1]
+    title, numbers = LEVELS[level]
+    rows, row = [], []
+    for n in numbers:
+        row.append(InlineKeyboardButton(text=str(n), callback_data=f"t:{level}:{n}"))
+        if len(row) == 4:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="tests")])
+    if call.message:
+        await call.message.edit_text(
+            f"📝 <b>{title}</b>\n\nTest raqamini tanlang 👇",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("t:"))
+async def send_test(call: CallbackQuery):
+    _, level, num = call.data.split(":")
+    title, _ = LEVELS[level]
+    folder = TESTS_DIR / f"topik{level}"
+    pdfs, audios = find_files(folder, num)
+
+    if not pdfs and not audios:
+        logging.warning("Fayl topilmadi: papka=%s raqam=%s", folder, num)
+        await call.answer("Bu test tez orada joylanadi 🙏", show_alert=True)
+        return
+
+    await call.answer("Yuborilmoqda, biroz kuting...")
+    try:
+        if not call.message:
+            return
+        for pdf in pdfs:
+            await call.message.answer_document(
+                FSInputFile(pdf), caption=f"📝 <b>{title} — {num}-test</b>"
+            )
+        for audio in audios:
+            cap = f"🎧 {title} — {num}-test audiosi"
+            if audio.suffix.lower() in (".mp3", ".m4a"):
+                await call.message.answer_audio(FSInputFile(audio), caption=cap)
+            else:
+                await call.message.answer_document(FSInputFile(audio), caption=cap)
+    except Exception:
+        logging.exception("Yuborishda xato")
+        await call.message.answer(
+            "⚠️ Fayl yuborilmadi. Fayl hajmi va hosting loglarini tekshiring."
+        )
+
+
+@dp.callback_query(F.data == "paid")
+async def paid(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✍️ Yozilish / savol berish", url=ADMIN_URL)],
+            BACK,
+        ]
+    )
+    if call.message:
+        await call.message.edit_text(PAID_COURSE_TEXT, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "freetime")
+async def freetime(call: CallbackQuery):
+    if FREE_TIME:
+        if call.message:
+            await call.message.edit_text(
+                "☕ <b>Bo'sh vaqtingiz bormi? Dam olib o'rganing!</b>",
+                reply_markup=links_menu(FREE_TIME),
+            )
+    else:
+        kb = InlineKeyboardMarkup(inline_keyboard=[CHANNEL_BTN, BACK])
+        if call.message:
+            await call.message.edit_text(
+                "☕ <b>Bo'sh vaqt bo'limi</b>\n\n"
+                "Bu bo'lim tez orada to'ldiriladi. Kuzatib boring 👇",
+                reply_markup=kb,
+            )
+    await call.answer()
+
+
+@dp.callback_query(F.data == "contact")
+async def contact(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Yozish", url=ADMIN_URL)],
+            CHANNEL_BTN,
+            BACK,
+        ]
+    )
+    if call.message:
+        await call.message.edit_text("Savollaringiz bo'lsa yozing 👇", reply_markup=kb)
+    await call.answer()
+
+
+async def main():
+    logging.info("Bot ishga tushmoqda...")
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+KOREYS TILI TELEGRAM BOTI
+
+1) bot.py, requirements.txt va tests/ papkasini bir loyihaga joylang.
+2) Hosting sozlamalarida BOT_TOKEN nomli environment variable yarating.
+3) Value maydoniga BotFather bergan YANGI tokenni kiriting. Uni GitHub yoki chatga yozmang.
+4) Start command: python bot.py
+
+Test fayllari joylashuvi:
+tests/topik1/35.pdf
+tests/topik1/35.mp3
+tests/topik2/35.pdf
+tests/topik2/35.mp3
+
+Eslatma: faqat bot.py va requirements.txt yetarli emas; test materiallari kerak bo'lsa,
+tests papkasini ham hostingga yuklang.
+
+aiogram>=3.13,<4.0
